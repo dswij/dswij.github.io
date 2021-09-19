@@ -3,8 +3,19 @@ languageCode: 'en-us'
 title: 'dswij'
 theme: "PaperMod"
 
+menu:
+  main:
+    - name: Contact me
+      url: contact/
+      weight: 10
+    - name: Acknowledgement
+      url: ack/
+      weight: 1
+
 params:
   homeInfoParams:
     Content: >
       Hello, this is mostly my personal notes and commentaries on my thoughts that I decided to jot down.
       Hopefully, you might find something interesting here.
+
+      First post will be on the way soon!
