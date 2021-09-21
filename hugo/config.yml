@@ -19,3 +19,8 @@ params:
       Hopefully, you might find something interesting here.
 
       First post will be on the way soon!
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
