@@ -1,13 +1,17 @@
 ---
-title: "Contact me"
+title: "Contact"
 layout: "contact"
 url: "/contact"
-summary: "contact me"
+---
+
 ---
 
 <ion-icon name="logo-github"></ion-icon> GitHub [dswij](https://github.com/dswij)
 
-<ion-icon name="mail-outline"></ion-icon> dswijj on Gmail's _com_ domain
+<ion-icon name="logo-gitlab"></ion-icon> GitLab [dswij](https://gitlab.com/dswij)
+
+<ion-icon name="mail-outline"></ion-icon> dswijj@gmail.com
+
 
 ---
 
