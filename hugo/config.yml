@@ -14,11 +14,8 @@ menu:
 
 params:
   homeInfoParams:
-    Content: >
-      Hello, this is mostly my personal notes and commentaries on my thoughts that I decided to jot down.
-      Hopefully, you might find something interesting here.
-
-      First post will be on the way soon!
+    Content: |
+      dswij's personal blog
 
 markup:
   goldmark:
