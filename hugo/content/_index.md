@@ -8,8 +8,6 @@ Currently active in contributing and helping to maintain [`hyper`](https://githu
 
 ## Updates
 
-- I'm going to RustNation UK 2024!
-
 ---
 
 ## Contact Me
