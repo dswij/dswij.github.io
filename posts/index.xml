@@ -1,83 +1,83 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on dswij</title><link>https://dswij.github.io/posts/</link><description>Recent content in Posts on dswij</description><generator>Hugo -- gohugo.io</generator><language>en</language><managingEditor>dswijj@gmailcom</managingEditor><webMaster>dswijj@gmailcom</webMaster><lastBuildDate>Fri, 08 Mar 2024 00:00:00 +0000</lastBuildDate><atom:link href="https://dswij.github.io/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>Deadlocks in the wild</title><link>https://dswij.github.io/posts/2/</link><pubDate>Fri, 08 Mar 2024 00:00:00 +0000</pubDate><author>dswijj@gmailcom</author><guid>https://dswij.github.io/posts/2/</guid><description>&lt;p>Deadlock is a tale as old as concurrency, and I&amp;rsquo;ve personally seen a fair share of it working with conventional, relational databases. But most recently, I stumbled upon a deadlock in &lt;a href="https://github.com/hyperium/h2">&lt;code>h2&lt;/code>&lt;/a>&lt;/p>
-&lt;h2 id="the-issue">The issue&lt;/h2>
-&lt;p>With a really high max concurrent stream count with a huge payload in HTTP/2, combined with a high number of &lt;code>Futures&lt;/code> in a single connection, &lt;code>hyper&lt;/code> client quickly hung. The time it took to get stuck seems random at first, but after tweaking some settings here and there, I got it to hang after 5 request-response most of the time.&lt;/p>
-&lt;p>Number 5 seems weird. A coincidence, perhaps?&lt;/p>
-&lt;h2 id="debugging-it">Debugging it&lt;/h2>
-&lt;p>I decided to enable logging with &lt;code>tracing_subscriber&lt;/code> and found out that it always hangs after it got into a certain state. More precisely, it happens when a stream tried to send a payload, but can&amp;rsquo;t get enough connection capacity. HTTP/2 introduced a flow control strategy where it is basically a mechanism to handle connection and stream capacities on top of the TCP layer. This allows multiple streams in a single connection to stream data concurrenctly in any order.&lt;/p>
-&lt;p>With that in mind, let&amp;rsquo;s look at the log. The funny thing is that it always hangs soon after this line: &lt;code>stream capacity is 0&lt;/code>.&lt;/p>
-&lt;pre tabindex="0">&lt;code class="language-log" data-lang="log">2023-11-18T16:49:56.726594Z TRACE Connection{peer=Client}:poll:pop_frame:popped{stream.id=StreamId(517) stream.state=State { inner: HalfClosedLocal(AwaitingHeaders) }}: h2::proto::streams::prioritize: stream capacity is 0
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on dswij</title><link>https://dswij.github.io/posts/</link><description>Recent content in Posts on dswij</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Fri, 08 Mar 2024 00:00:00 +0000</lastBuildDate><atom:link href="https://dswij.github.io/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>Deadlocks in the wild</title><link>https://dswij.github.io/posts/2/</link><pubDate>Fri, 08 Mar 2024 00:00:00 +0000</pubDate><guid>https://dswij.github.io/posts/2/</guid><description>&lt;p&gt;Deadlock is a tale as old as concurrency, and I&amp;rsquo;ve personally seen a fair share of it working with conventional, relational databases. But most recently, I stumbled upon a deadlock in &lt;a href="https://github.com/hyperium/h2"&gt;&lt;code&gt;h2&lt;/code&gt;&lt;/a&gt;&lt;/p&gt;
+&lt;h2 id="the-issue"&gt;The issue&lt;/h2&gt;
+&lt;p&gt;With a really high max concurrent stream count with a huge payload in HTTP/2, combined with a high number of &lt;code&gt;Futures&lt;/code&gt; in a single connection, &lt;code&gt;hyper&lt;/code&gt; client quickly hung. The time it took to get stuck seems random at first, but after tweaking some settings here and there, I got it to hang after 5 request-response most of the time.&lt;/p&gt;
+&lt;p&gt;Number 5 seems weird. A coincidence, perhaps?&lt;/p&gt;
+&lt;h2 id="debugging-it"&gt;Debugging it&lt;/h2&gt;
+&lt;p&gt;I decided to enable logging with &lt;code&gt;tracing_subscriber&lt;/code&gt; and found out that it always hangs after it got into a certain state. More precisely, it happens when a stream tried to send a payload, but can&amp;rsquo;t get enough connection capacity. HTTP/2 introduced a flow control strategy where it is basically a mechanism to handle connection and stream capacities on top of the TCP layer. This allows multiple streams in a single connection to stream data concurrenctly in any order.&lt;/p&gt;
+&lt;p&gt;With that in mind, let&amp;rsquo;s look at the log. The funny thing is that it always hangs soon after this line: &lt;code&gt;stream capacity is 0&lt;/code&gt;.&lt;/p&gt;
+&lt;pre tabindex="0"&gt;&lt;code class="language-log" data-lang="log"&gt;2023-11-18T16:49:56.726594Z TRACE Connection{peer=Client}:poll:pop_frame:popped{stream.id=StreamId(517) stream.state=State { inner: HalfClosedLocal(AwaitingHeaders) }}: h2::proto::streams::prioritize: stream capacity is 0
 2023-11-18T16:49:56.726599Z TRACE Connection{peer=Client}:poll:FramedWrite::flush: h2::codec::framed_write: flushing buffer
 2023-11-18T16:49:56.726603Z TRACE Connection{peer=Client}:poll: tokio::task::waker: op=&amp;#34;waker.clone&amp;#34; task.id=5
 2023-11-18T16:49:56.726607Z TRACE Connection{peer=Client}:poll: tokio::task::waker: op=&amp;#34;waker.drop&amp;#34; task.id=5
 # HANGS
-&lt;/code>&lt;/pre>&lt;p>Interesting. Let&amp;rsquo;s dive into the code for a bit:&lt;/p>
-&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-rust" data-lang="rust">&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">if&lt;/span> sz &lt;span style="color:#f92672">&amp;gt;&lt;/span> &lt;span style="color:#ae81ff">0&lt;/span> &lt;span style="color:#f92672">&amp;amp;&amp;amp;&lt;/span> stream_capacity &lt;span style="color:#f92672">==&lt;/span> &lt;span style="color:#ae81ff">0&lt;/span> {
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> tracing::trace!(&lt;span style="color:#e6db74">&amp;#34;stream capacity is 0&amp;#34;&lt;/span>);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> stream.pending_send.push_front(buffer, frame.into());
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">continue&lt;/span>;
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
-&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>It just run out of things that can be sent immediately because we don&amp;rsquo;t have any capacity to send. Well, where did all the connection capacity go? Let&amp;rsquo;s look at how we assign the pending capacity then:&lt;/p>
-&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-rust" data-lang="rust">&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// on receive WINDOW_UPDATE
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#66d9ef">if&lt;/span> stream.send_flow.available() &lt;span style="color:#f92672">&amp;lt;&lt;/span> stream.requested_send_capacity &lt;span style="color:#66d9ef">as&lt;/span> &lt;span style="color:#66d9ef">usize&lt;/span>
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#f92672">&amp;amp;&amp;amp;&lt;/span> stream.send_flow.has_unavailable()
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> {
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// The stream requires additional capacity and the stream&amp;#39;s
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#75715e">// window has available capacity, but the connection window
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#75715e">// does not.
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#75715e">//
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#75715e">// In this case, the stream needs to be queued up for when the
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#75715e">// connection has more capacity.
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> self.pending_capacity.push(stream);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
-&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>prying on &lt;code>pending_capacity&lt;/code>, there&amp;rsquo;s not only &lt;code>max_concurrent_stream&lt;/code> amount of stream there. All the &lt;code>Futures&lt;/code> are in pending_capacity. Aha! Now the deadlock sensor is tingling all over the place.&lt;/p>
-&lt;p>Ok, that&amp;rsquo;s cool. But I hadn&amp;rsquo;t really figure out why it got stuck after 5 request or why it got stuck at all! Yes, the capacity is poorly placed to non-sending streams, but that&amp;rsquo;s all we have right now.&lt;/p>
-&lt;p>Upon further inspection, there are a couple of things that stood out:&lt;/p>
-&lt;ol>
-&lt;li>the server sent back WINDOW_UPDATE frames in small increments.&lt;/li>
-&lt;li>the payload max size is &lt;code>5 * the max body buffer size&lt;/code>.&lt;/li>
-&lt;li>streams are put back to &lt;code>pending_capacity&lt;/code> in a LIFO-manner.&lt;/li>
-&lt;/ol>
-&lt;p>That&amp;rsquo;s the problem. The inert Futures waiting in &lt;code>pending_capacity&lt;/code> is just hogging all the connection capacity. We&amp;rsquo;re left without any capacity for sending messages in send-ready streams.&lt;/p>
-&lt;h2 id="the-fix">The fix&lt;/h2>
-&lt;p>A really easy fix is to probably to put those ready to send in front of the queue. And it works perfectly fine.&lt;/p>
-&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-rust" data-lang="rust">&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// if the stream needs capacity we add:
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#66d9ef">if&lt;/span> stream.is_send_ready() {
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// Prioritize assigning capacity to a send-ready stream
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> self.pending_capacity.push_front(stream);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> } &lt;span style="color:#66d9ef">else&lt;/span> {
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> self.pending_capacity.push(stream);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
-&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>But this runs into a problem when all the send-ready streams sent some of their payload, while we receive a WINDOW_UPDATE frames. Those streams are not in &lt;code>pending_capacity&lt;/code> when this happens and some of the connection capacity will go to those inert streams. This won&amp;rsquo;t get to a deadlock, but the connection capacity will be distributed poorly.&lt;/p>
-&lt;p>Let&amp;rsquo;s fix that again:&lt;/p>
-&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-rust" data-lang="rust">&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// on receiving WINDOW_UPDATE
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#66d9ef">if&lt;/span> &lt;span style="color:#f92672">!&lt;/span>stream.is_pending_open {
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> self.try_assign_capacity(stream);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// somewhere in the code when we can open another stream
-&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#66d9ef">if&lt;/span> &lt;span style="color:#66d9ef">let&lt;/span> Some(&lt;span style="color:#66d9ef">mut&lt;/span> stream) &lt;span style="color:#f92672">=&lt;/span> self.pop_pending_open(store, counts) {
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> self.pending_send.push_front(&lt;span style="color:#f92672">&amp;amp;&lt;/span>&lt;span style="color:#66d9ef">mut&lt;/span> stream);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> self.try_assign_capacity(&lt;span style="color:#f92672">&amp;amp;&lt;/span>&lt;span style="color:#66d9ef">mut&lt;/span> stream);
-&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
-&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Done! that&amp;rsquo;s neat.&lt;/p>
-&lt;h2 id="what-now">What now?&lt;/h2>
-&lt;p>Well, the flow control in HTTP/2 turns out to be challenging. Since &lt;code>h2&lt;/code>&amp;rsquo;s implementation is eager on assigning capacity, combining it with another &lt;code>Semaphore&lt;/code> leads to another &lt;a href="https://github.com/hyperium/hyper/issues/3559">deadlock&lt;/a>!&lt;/p>
-&lt;p>But that&amp;rsquo;s for another post.&lt;/p></description></item><item><title>Please, *blame*</title><link>https://dswij.github.io/posts/1/</link><pubDate>Sun, 13 Feb 2022 00:00:00 +0000</pubDate><author>dswijj@gmailcom</author><guid>https://dswij.github.io/posts/1/</guid><description>&lt;h2 id="foreword">Foreword&lt;/h2>
-&lt;p>I am not an advocate of blame. &lt;em>blame&lt;/em> here refers to - as some of you might have guessed - &lt;em>git blame&lt;/em>. This topic has been discussed all over the internet (insert some articles about &lt;em>git blame&lt;/em> and the power of &lt;em>git blame&lt;/em>), but I have seen far too many projects, blameless. And for this reason, allow me to reiterate this in a blog post, in the hopes that someone might find their way here.&lt;/p>
-&lt;h2 id="painpoints-in-production-code">Painpoints in production code&lt;/h2>
-&lt;p>Most people that have worked with software realized that at some point, code and practices are bound to be ancient relics. Especially in code that is not well maintained, a new person diving into production code will cringe, and as such reverts to the mentality of &amp;ldquo;if it ain&amp;rsquo;t broke, don&amp;rsquo;t fix it&amp;rdquo;.&lt;/p>
-&lt;p>There is some truth to that mentality, but it is one of those that are more ambiguous than cliché. This kind of approach in maintaining software will only lead to frustration in the long run. Say you see a code that does not belong. It might be a hack, a workaround, or whatever. Remove this line and your tests might be screaming at you with red markings immediately. Worse, remove that line and your tests still passed. Your mind now wanders, &amp;ldquo;&lt;em>is the test in this codebase proper?&lt;/em>&amp;rdquo;, &amp;ldquo;&lt;em>what if a case is not covered in the test?&lt;/em>&amp;rdquo;. OK, maybe trust that the engineers have had to properly write the code. But, are you willing to risk it and ship it? Your anxiety rose through the roof. You decide not to do anything with that particular piece of weird-looking code.&lt;/p>
-&lt;p>Or maybe you decided that it is alright to remove the line. Everything works well, and you relax for a while. Until a few weeks later, you have forgotten about it and someone got paged. You learned that removing these kinds of code is not worth it, and you will most likely in the future let this code fly by you.&lt;/p>
-&lt;h2 id="nah">Nah.&lt;/h2>
-&lt;blockquote>
-&lt;p>So, just have a higher standard for software developers/engineers.&lt;/p>
-&lt;/blockquote>
-&lt;p>Maybe. Maybe not. We, as a human (which I assume you are), will at some point make an error. Be it a bad day, sleepy eyes, or distraction, whatever it might be, I strongly believe that any human will make some error. It is a question of &lt;em>when&lt;/em>.&lt;/p>
-&lt;blockquote>
-&lt;p>So, just have someone review it. Even better, have more reviewers!&lt;/p>
-&lt;/blockquote>
-&lt;p>Statistically speaking, in an ideal world, we would like to have 100 reviewers. Even getting 5 is nice. But people are busy, and companies might be lacking resources.&lt;/p>
-&lt;p>A single reviewer simply might make the same error with the person implementing the change.&lt;/p>
-&lt;h2 id="so-blame">So, &lt;em>blame&lt;/em>?&lt;/h2>
-&lt;p>I&amp;rsquo;m pretty sure most of you by now had seen the use case of &lt;em>blame&lt;/em> here: &amp;ldquo;Do a &lt;em>git blame&lt;/em> and see why the code is there from the commit message&amp;rdquo;. Seems simple, but I have seen too many projects and organizations that simply forget or ignore this.&lt;/p>
-&lt;p>That is to say, it is not &lt;em>blame&lt;/em> that one needs to practice. It is the practice of documenting all things that seems trivial. This can easily be done with commit messages. Other bigger explanations can be put into an internal documentation system. It might be easy for you at the time, but the next eyes looking at the code might disagree. Maybe the next person can find the reason on the internet, but why make their life harder?&lt;/p></description></item></channel></rss>
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;Interesting. Let&amp;rsquo;s dive into the code for a bit:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"&gt;&lt;code class="language-rust" data-lang="rust"&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#66d9ef"&gt;if&lt;/span&gt; sz &lt;span style="color:#f92672"&gt;&amp;gt;&lt;/span&gt; &lt;span style="color:#ae81ff"&gt;0&lt;/span&gt; &lt;span style="color:#f92672"&gt;&amp;amp;&amp;amp;&lt;/span&gt; stream_capacity &lt;span style="color:#f92672"&gt;==&lt;/span&gt; &lt;span style="color:#ae81ff"&gt;0&lt;/span&gt; {
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; tracing::&lt;span style="color:#a6e22e"&gt;trace!&lt;/span&gt;(&lt;span style="color:#e6db74"&gt;&amp;#34;stream capacity is 0&amp;#34;&lt;/span&gt;);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; stream.pending_send.push_front(buffer, frame.into());
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#66d9ef"&gt;continue&lt;/span&gt;;
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; }
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;It just run out of things that can be sent immediately because we don&amp;rsquo;t have any capacity to send. Well, where did all the connection capacity go? Let&amp;rsquo;s look at how we assign the pending capacity then:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"&gt;&lt;code class="language-rust" data-lang="rust"&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// on receive WINDOW_UPDATE
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#66d9ef"&gt;if&lt;/span&gt; stream.send_flow.available() &lt;span style="color:#f92672"&gt;&amp;lt;&lt;/span&gt; stream.requested_send_capacity &lt;span style="color:#66d9ef"&gt;as&lt;/span&gt; &lt;span style="color:#66d9ef"&gt;usize&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#f92672"&gt;&amp;amp;&amp;amp;&lt;/span&gt; stream.send_flow.has_unavailable()
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; {
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// The stream requires additional capacity and the stream&amp;#39;s
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// window has available capacity, but the connection window
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// does not.
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;//
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// In this case, the stream needs to be queued up for when the
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// connection has more capacity.
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; self.pending_capacity.push(stream);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; }
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;prying on &lt;code&gt;pending_capacity&lt;/code&gt;, there&amp;rsquo;s not only &lt;code&gt;max_concurrent_stream&lt;/code&gt; amount of stream there. All the &lt;code&gt;Futures&lt;/code&gt; are in pending_capacity. Aha! Now the deadlock sensor is tingling all over the place.&lt;/p&gt;
+&lt;p&gt;Ok, that&amp;rsquo;s cool. But I hadn&amp;rsquo;t really figure out why it got stuck after 5 request or why it got stuck at all! Yes, the capacity is poorly placed to non-sending streams, but that&amp;rsquo;s all we have right now.&lt;/p&gt;
+&lt;p&gt;Upon further inspection, there are a couple of things that stood out:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;the server sent back WINDOW_UPDATE frames in small increments.&lt;/li&gt;
+&lt;li&gt;the payload max size is &lt;code&gt;5 * the max body buffer size&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;streams are put back to &lt;code&gt;pending_capacity&lt;/code&gt; in a LIFO-manner.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;That&amp;rsquo;s the problem. The inert Futures waiting in &lt;code&gt;pending_capacity&lt;/code&gt; is just hogging all the connection capacity. We&amp;rsquo;re left without any capacity for sending messages in send-ready streams.&lt;/p&gt;
+&lt;h2 id="the-fix"&gt;The fix&lt;/h2&gt;
+&lt;p&gt;A really easy fix is to probably to put those ready to send in front of the queue. And it works perfectly fine.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"&gt;&lt;code class="language-rust" data-lang="rust"&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// if the stream needs capacity we add:
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#66d9ef"&gt;if&lt;/span&gt; stream.is_send_ready() {
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// Prioritize assigning capacity to a send-ready stream
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; self.pending_capacity.push_front(stream);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; } &lt;span style="color:#66d9ef"&gt;else&lt;/span&gt; {
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; self.pending_capacity.push(stream);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; }
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;But this runs into a problem when all the send-ready streams sent some of their payload, while we receive a WINDOW_UPDATE frames. Those streams are not in &lt;code&gt;pending_capacity&lt;/code&gt; when this happens and some of the connection capacity will go to those inert streams. This won&amp;rsquo;t get to a deadlock, but the connection capacity will be distributed poorly.&lt;/p&gt;
+&lt;p&gt;Let&amp;rsquo;s fix that again:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"&gt;&lt;code class="language-rust" data-lang="rust"&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// on receiving WINDOW_UPDATE
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#66d9ef"&gt;if&lt;/span&gt; &lt;span style="color:#f92672"&gt;!&lt;/span&gt;stream.is_pending_open {
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; self.try_assign_capacity(stream);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; }
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#75715e"&gt;// somewhere in the code when we can open another stream
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; &lt;span style="color:#66d9ef"&gt;if&lt;/span&gt; &lt;span style="color:#66d9ef"&gt;let&lt;/span&gt; Some(&lt;span style="color:#66d9ef"&gt;mut&lt;/span&gt; stream) &lt;span style="color:#f92672"&gt;=&lt;/span&gt; self.pop_pending_open(store, counts) {
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; self.pending_send.push_front(&lt;span style="color:#f92672"&gt;&amp;amp;&lt;/span&gt;&lt;span style="color:#66d9ef"&gt;mut&lt;/span&gt; stream);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; self.try_assign_capacity(&lt;span style="color:#f92672"&gt;&amp;amp;&lt;/span&gt;&lt;span style="color:#66d9ef"&gt;mut&lt;/span&gt; stream);
+&lt;/span&gt;&lt;/span&gt;&lt;span style="display:flex;"&gt;&lt;span&gt; }
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Done! that&amp;rsquo;s neat.&lt;/p&gt;
+&lt;h2 id="what-now"&gt;What now?&lt;/h2&gt;
+&lt;p&gt;Well, the flow control in HTTP/2 turns out to be challenging. Since &lt;code&gt;h2&lt;/code&gt;&amp;rsquo;s implementation is eager on assigning capacity, combining it with another &lt;code&gt;Semaphore&lt;/code&gt; leads to another &lt;a href="https://github.com/hyperium/hyper/issues/3559"&gt;deadlock&lt;/a&gt;!&lt;/p&gt;
+&lt;p&gt;But that&amp;rsquo;s for another post.&lt;/p&gt;</description></item><item><title>Please, *blame*</title><link>https://dswij.github.io/posts/1/</link><pubDate>Sun, 13 Feb 2022 00:00:00 +0000</pubDate><guid>https://dswij.github.io/posts/1/</guid><description>&lt;h2 id="foreword"&gt;Foreword&lt;/h2&gt;
+&lt;p&gt;I am not an advocate of blame. &lt;em&gt;blame&lt;/em&gt; here refers to - as some of you might have guessed - &lt;em&gt;git blame&lt;/em&gt;. This topic has been discussed all over the internet (insert some articles about &lt;em&gt;git blame&lt;/em&gt; and the power of &lt;em&gt;git blame&lt;/em&gt;), but I have seen far too many projects, blameless. And for this reason, allow me to reiterate this in a blog post, in the hopes that someone might find their way here.&lt;/p&gt;
+&lt;h2 id="painpoints-in-production-code"&gt;Painpoints in production code&lt;/h2&gt;
+&lt;p&gt;Most people that have worked with software realized that at some point, code and practices are bound to be ancient relics. Especially in code that is not well maintained, a new person diving into production code will cringe, and as such reverts to the mentality of &amp;ldquo;if it ain&amp;rsquo;t broke, don&amp;rsquo;t fix it&amp;rdquo;.&lt;/p&gt;
+&lt;p&gt;There is some truth to that mentality, but it is one of those that are more ambiguous than cliché. This kind of approach in maintaining software will only lead to frustration in the long run. Say you see a code that does not belong. It might be a hack, a workaround, or whatever. Remove this line and your tests might be screaming at you with red markings immediately. Worse, remove that line and your tests still passed. Your mind now wanders, &amp;ldquo;&lt;em&gt;is the test in this codebase proper?&lt;/em&gt;&amp;rdquo;, &amp;ldquo;&lt;em&gt;what if a case is not covered in the test?&lt;/em&gt;&amp;rdquo;. OK, maybe trust that the engineers have had to properly write the code. But, are you willing to risk it and ship it? Your anxiety rose through the roof. You decide not to do anything with that particular piece of weird-looking code.&lt;/p&gt;
+&lt;p&gt;Or maybe you decided that it is alright to remove the line. Everything works well, and you relax for a while. Until a few weeks later, you have forgotten about it and someone got paged. You learned that removing these kinds of code is not worth it, and you will most likely in the future let this code fly by you.&lt;/p&gt;
+&lt;h2 id="nah"&gt;Nah.&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;So, just have a higher standard for software developers/engineers.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Maybe. Maybe not. We, as a human (which I assume you are), will at some point make an error. Be it a bad day, sleepy eyes, or distraction, whatever it might be, I strongly believe that any human will make some error. It is a question of &lt;em&gt;when&lt;/em&gt;.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;So, just have someone review it. Even better, have more reviewers!&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Statistically speaking, in an ideal world, we would like to have 100 reviewers. Even getting 5 is nice. But people are busy, and companies might be lacking resources.&lt;/p&gt;
+&lt;p&gt;A single reviewer simply might make the same error with the person implementing the change.&lt;/p&gt;
+&lt;h2 id="so-blame"&gt;So, &lt;em&gt;blame&lt;/em&gt;?&lt;/h2&gt;
+&lt;p&gt;I&amp;rsquo;m pretty sure most of you by now had seen the use case of &lt;em&gt;blame&lt;/em&gt; here: &amp;ldquo;Do a &lt;em&gt;git blame&lt;/em&gt; and see why the code is there from the commit message&amp;rdquo;. Seems simple, but I have seen too many projects and organizations that simply forget or ignore this.&lt;/p&gt;
+&lt;p&gt;That is to say, it is not &lt;em&gt;blame&lt;/em&gt; that one needs to practice. It is the practice of documenting all things that seems trivial. This can easily be done with commit messages. Other bigger explanations can be put into an internal documentation system. It might be easy for you at the time, but the next eyes looking at the code might disagree. Maybe the next person can find the reason on the internet, but why make their life harder?&lt;/p&gt;</description></item></channel></rss>
