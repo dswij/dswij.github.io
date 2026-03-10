@@ -8,7 +8,6 @@ rssLimit = 10
 theme = "texify3-fork"
 title = "dswij"
 
-
 [taxonomies]
 tags = "tags"
 categories = "categories"
@@ -27,6 +26,11 @@ rootFontSize = "120%"
 math = true
 enableDuckDuckGoSearchBox = true
 numberedSubtitles = true
+
+[params.author]
+email = "dswijj@gmail.com"
+name = "dswij"
+
 
 [[menu.main]]
 identifier = "about"
@@ -50,3 +54,12 @@ weight = 2
 [pagination]
 pagerSize = 5
 
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.extensions]
+      strikethrough = false
+      [markup.goldmark.extensions.extras]
+        [markup.goldmark.extensions.extras.subscript]
+          enable = true
+        [markup.goldmark.extensions.extras.superscript]
+          enable = true
