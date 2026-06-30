@@ -12,11 +12,13 @@ title = "dswij"
 tags = "tags"
 categories = "categories"
 
+[security.node.permissions]
+disable = true
+
 [params]
 title="dswij"
 description = "dswij's personal blog"
-footnote = """
-"""
+footnote = """ """
 customCSS = []
 customJS = []
 dateFormat = "2 January 2006"
